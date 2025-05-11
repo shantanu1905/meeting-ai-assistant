@@ -1,0 +1,15 @@
+bcrypt
+cryptography
+email-validator
+fastapi
+passlib
+pydantic
+pydantic_core
+PyJWT
+SQLAlchemy
+python-dotenv
+uvicorn
+python-multipart
+SQLAlchemy
+pandas
+psycopg2

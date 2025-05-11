@@ -1,0 +1,11 @@
+.env
+/env
+/uploaded_files
+app/__pycache__
+app/helpers/__pycache__
+app/local_database/__pycache__
+app/routers/__pycache__
+app.log
+
+
+
