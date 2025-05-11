@@ -13,3 +13,4 @@ python-multipart
 SQLAlchemy
 pandas
 psycopg2
+requests
