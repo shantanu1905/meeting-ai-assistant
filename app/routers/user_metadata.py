@@ -7,16 +7,18 @@ import app.local_database.models as _models
 import sqlalchemy.orm as _orm
 import app.helpers.auth_services as _services
 import app.local_database.database as _database
+from app.helpers.constants import DATAPREP_URL, UPLOAD_DIR
 from app.logger import Logger
+import requests
 import os 
 import shutil
 
 # Create an instance of the Logger class
 logger_instance = Logger()
 # Get a logger for your module
-logger = logger_instance.get_logger("files_management_router")
+logger = logger_instance.get_logger("user_metadata")
 router = APIRouter(
-    tags=["files_management_router"])
+    tags=["user_metadata"])
 
 
 def get_db():
@@ -26,13 +28,6 @@ def get_db():
     finally:
         db.close()
 
-
-
-
-
-
-
-from fastapi import UploadFile, File, Form
 
 @router.post("/upload_meeting_file/{meeting_id}", response_model=_schemas.MeetingLibraryResponse)
 async def upload_single_meeting_file(
@@ -54,26 +49,38 @@ async def upload_single_meeting_file(
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found or not authorized")
 
-    upload_dir = "uploaded_files"
-    os.makedirs(upload_dir, exist_ok=True)
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     filename = f"{filetype}_{meeting_id}_{file.filename}"
-    file_path = os.path.join(upload_dir, filename)
+    file_path = os.path.join(UPLOAD_DIR, filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Check if a record exists
+    # Save path to DB
     library = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
     if not library:
         library = _models.MeetingLibrary(meeting_id=meeting_id)
         db.add(library)
 
-    # Update correct field
     setattr(library, f"{filetype}_path", file_path)
-
     db.commit()
     db.refresh(library)
 
-    return library
+    # 🔄 In-place File Processing (send to DataPrep)
+    try:
+        with open(file_path, 'rb') as f:
+            files = {'files': (filename, f)}
+            data = {
+                "index_name": str(meeting_id),
+                "chunk_size": "500",
+                "chunk_overlap": "200"
+            }
+            r = requests.post(DATAPREP_URL, files=files, data=data)
+            r.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"File uploaded but embedding failed: {str(e)}")
 
+    return library
     
+
+
