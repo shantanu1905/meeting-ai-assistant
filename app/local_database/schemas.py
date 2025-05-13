@@ -160,6 +160,19 @@ class Translation(TranslationBase):
         orm_mode = True
 
 
+# -------------------- Meeting Question and Answer  --------------------
+class MeetingQandA(pydantic.BaseModel):
+    meeting_id: str
+    question: str
+    class Config:
+        orm_mode = True
+  
+
+
+
+
+
+
 
 class Meeting(MeetingBase):
     id: int
