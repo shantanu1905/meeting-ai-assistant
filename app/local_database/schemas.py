@@ -167,7 +167,13 @@ class MeetingQandA(pydantic.BaseModel):
     class Config:
         orm_mode = True
   
-
+# -------------------- Meeting of Minutes   --------------------
+class MeetingMinutes(pydantic.BaseModel):
+    meeting_id: str
+    language: str
+    class Config:
+        orm_mode = True
+  
 
 
 
