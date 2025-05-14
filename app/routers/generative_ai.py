@@ -5,9 +5,10 @@ import app.local_database.models as _models
 import app.helpers.auth_services as _services
 import app.local_database.database as _database
 from app.helpers.constants import EMBEDDING_URL , RETRIVER_URL
-from app.helpers.ai_operations import get_embedding, retrieve_similar_documents, build_qa_prompt , generate_llm_answer
+from app.helpers.ai_operations import get_embedding, retrieve_similar_documents, build_qa_prompt , generate_llm_answer , meeting_minutes_prompt , parse_meeting_minutes
 from app.logger import Logger
 import sqlalchemy.orm as _orm
+import os 
 
 # Create an instance of the Logger class
 logger_instance = Logger()
@@ -69,3 +70,54 @@ async def meeting_qna(
         raise HTTPException(status_code=500, detail="Failed to generate answer")
 
     return {"question": question, "answer": answer}
+
+
+
+
+@router.post("/meeting_minutes/")
+async def generate_meeting_minutes(
+    meeting_input: _schemas.MeetingMinutes,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+   
+    meeting_id = meeting_input.meeting_id
+    language = meeting_input.language
+    
+
+
+    # 🔐 Validate meeting ownership
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise _fastapi.HTTPException(status_code=404, detail="Meeting not found or not authorized")
+
+    # 🗂️ Fetch related MeetingLibrary record
+    library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+    if not library_entry or not library_entry.transcript_path:
+        raise _fastapi.HTTPException(status_code=404, detail="Transcript path not found in MeetingLibrary")
+
+    transcript_path = library_entry.transcript_path
+    if not os.path.exists(transcript_path):
+        raise _fastapi.HTTPException(status_code=404, detail="Transcript file not found on disk")
+
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript_text = f.read()
+    except Exception as e:
+        logger.error(f"Failed to read transcript: {str(e)}")
+        raise _fastapi.HTTPException(status_code=500, detail="Failed to read transcript")
+
+    # 🧠 Build prompt for meeting minutes
+    context_chunks = [{"text": transcript_text}]
+    prompt = meeting_minutes_prompt(context_chunks)
+
+    # ✨ Call LLM to generate minutes
+    try:
+        meeting_minutes = generate_llm_answer(prompt)
+        structured = parse_meeting_minutes(meeting_minutes)
+
+    except Exception as e:
+        logger.error(f"LLM generation failed: {str(e)}")
+        raise _fastapi.HTTPException(status_code=500, detail="Failed to generate meeting minutes")
+
+    return {"meeting_id": meeting_id, "neeting_of_minutes": structured}
