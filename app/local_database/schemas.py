@@ -1,63 +1,63 @@
 from datetime import datetime
-import pydantic 
 from typing import List, Optional
+from pydantic import BaseModel
 
 
-class UserBase(pydantic.BaseModel):
+# -------------------- User --------------------
+class UserBase(BaseModel):
     name: str
     email: str
+
     class Config:
-       from_attributes=True
+        from_attributes = True
 
 class UserCreate(UserBase):
     password: str
-    class Config:
-       from_attributes=True
 
 class User(UserBase):
     id: int
     date_created: datetime
-    class Config:
-       from_attributes=True
 
 
-class GenerateUserToken(pydantic.BaseModel):
+# -------------------- Auth --------------------
+class GenerateUserToken(BaseModel):
     username: str
     password: str
-    class Config:
-        from_attributes=True
 
-class GenerateOtp(pydantic.BaseModel):
+class GenerateOtp(BaseModel):
     email: str
-    
-class VerifyOtp(pydantic.BaseModel):
+
+class VerifyOtp(BaseModel):
     email: str
     otp: int
 
 
+# -------------------- Participant --------------------
+
+class ParticipantCreate(BaseModel):
+    name: str
+    email: str
+
+class ParticipantResponse(BaseModel):
+    id: int
+    name: str
+    email: str
 
 
+# -------------------- AgendaItem --------------------
+class AgendaItemBase(BaseModel):
+    topic: str
 
-
-
-# -------------------- Meeting --------------------
-class MeetingBase(pydantic.BaseModel):
-    meeting_name: str
-    meeting_date: Optional[datetime] = None
-
-class MeetingCreate(MeetingBase):
+class AgendaItemCreate(AgendaItemBase):
     pass
 
-class Meeting(MeetingBase):
+class AgendaItem(AgendaItemBase):
     id: int
-    user_id: int
-
-    class Config:
-        orm_mode = True
+    meeting_id: int
 
 
 # -------------------- MeetingLibrary --------------------
-class MeetingLibraryBase(pydantic.BaseModel):
+class MeetingLibraryBase(BaseModel):
     transcript_path: Optional[str] = None
     audio_path: Optional[str] = None
     video_path: Optional[str] = None
@@ -72,7 +72,7 @@ class MeetingLibrary(MeetingLibraryBase):
     class Config:
         orm_mode = True
 
-class MeetingLibraryResponse(pydantic.BaseModel):
+class MeetingLibraryResponse(BaseModel):
     id: int
     transcript_path: Optional[str]
     audio_path: Optional[str]
@@ -83,10 +83,10 @@ class MeetingLibraryResponse(pydantic.BaseModel):
         orm_mode = True
 
 # -------------------- MeetingInsights --------------------
-class MeetingInsightsBase(pydantic.BaseModel):
-    summary: Optional[str] = None
-    action_points: Optional[str] = None
-    minutes_of_meeting: Optional[str] = None
+class MeetingInsightsBase(BaseModel):
+    summary: Optional[str]
+    action_points: Optional[str]
+    minutes_of_meeting: Optional[str]
 
 class MeetingInsightsCreate(MeetingInsightsBase):
     pass
@@ -95,41 +95,9 @@ class MeetingInsights(MeetingInsightsBase):
     id: int
     meeting_id: int
 
-    class Config:
-        orm_mode = True
-
-
-# -------------------- AgendaItem --------------------
-class AgendaItemBase(pydantic.BaseModel):
-    topic: str
-
-class AgendaItemCreate(AgendaItemBase):
-    pass
-
-class AgendaItem(AgendaItemBase):
-    id: int
-    meeting_id: int
-
-    class Config:
-        orm_mode = True
-
-
-# -------------------- Participant --------------------
-class ParticipantBase(pydantic.BaseModel):
-    name: str
-    email: str
-
-class ParticipantCreate(ParticipantBase):
-    pass
-
-class Participant(ParticipantBase):
-    id: int
-
-    class Config:
-        orm_mode = True
 
 # -------------------- SentimentLine --------------------
-class SentimentLineBase(pydantic.BaseModel):
+class SentimentLineBase(BaseModel):
     sentence: str
     sentiment: str  # 'Positive', 'Negative', 'Neutral'
 
@@ -140,12 +108,9 @@ class SentimentLine(SentimentLineBase):
     id: int
     meeting_id: int
 
-    class Config:
-        orm_mode = True
-
 
 # -------------------- Translation --------------------
-class TranslationBase(pydantic.BaseModel):
+class TranslationBase(BaseModel):
     language: str
     translated_text: str
 
@@ -156,39 +121,34 @@ class Translation(TranslationBase):
     id: int
     meeting_id: int
 
-    class Config:
-        orm_mode = True
 
+# -------------------- Meeting --------------------
+class MeetingBase(BaseModel):
+    meeting_name: str
+    meeting_date: datetime
+    meeting_description : Optional[str] = None
 
-# -------------------- Meeting Question and Answer  --------------------
-class MeetingQandA(pydantic.BaseModel):
-    meeting_id: str
-    question: str
-    class Config:
-        orm_mode = True
-  
-# -------------------- Meeting of Minutes   --------------------
-class MeetingMinutes(pydantic.BaseModel):
-    meeting_id: str
-    language: str
-    class Config:
-        orm_mode = True
-  
-
-
-
-
-
-
-class Meeting(MeetingBase):
+class MeetingCreate(MeetingBase):
+    participants: Optional[List[ParticipantCreate]] = []
+   
+class MeetingResponse(BaseModel):
     id: int
     user_id: int
+    meeting_name: str
+    meeting_date: datetime
+    meeting_description: str
+    participants: List[ParticipantResponse] = []
     library: Optional[MeetingLibrary]
-    insights: Optional[MeetingInsights]
-    agenda: List[AgendaItem] = []
-    participants: List[Participant] = []
-    sentiments: List[SentimentLine] = []
-    translations: List[Translation] = []
 
     class Config:
         orm_mode = True
+
+
+# -------------------- Q&A and Minutes Input --------------------
+class MeetingQandA(BaseModel):
+    meeting_id: str
+    question: str
+
+class MeetingMinutes(BaseModel):
+    meeting_id: str
+    language: str
