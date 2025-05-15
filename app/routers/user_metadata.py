@@ -7,11 +7,13 @@ import app.local_database.models as _models
 import sqlalchemy.orm as _orm
 import app.helpers.auth_services as _services
 import app.local_database.database as _database
-from app.helpers.constants import DATAPREP_URL, UPLOAD_DIR
+from app.helpers.constants import DATAPREP_URL, UPLOAD_DIR 
+from app.helpers.ai_operations import transcribe_audio
 from app.logger import Logger
 import requests
 import os 
 import shutil
+import moviepy as mp
 
 # Create an instance of the Logger class
 logger_instance = Logger()
@@ -29,47 +31,68 @@ def get_db():
         db.close()
 
 
+
 @router.post("/upload_meeting_file/{meeting_id}", response_model=_schemas.MeetingLibraryResponse)
 async def upload_single_meeting_file(
     meeting_id: int,
     file: UploadFile = File(...),
-    filetype: str = Form(...),  # Accepts 'transcript', 'audio', or 'video'
     db: _orm.Session = _fastapi.Depends(get_db),
     user: _schemas.User = _fastapi.Depends(_services.get_current_user)
 ):
-    valid_types = ["transcript", "audio", "video"]
-    if filetype not in valid_types:
-        raise HTTPException(status_code=400, detail="Invalid filetype. Must be 'transcript', 'audio', or 'video'")
+    ext = file.filename.split('.')[-1].lower()
+    if ext not in ["txt", "mp3", "wav", "mp4"]:
+        raise HTTPException(status_code=400, detail="Unsupported file format. Must be .txt, .mp3, .wav, or .mp4")
 
     meeting = db.query(_models.Meeting).filter(
         _models.Meeting.id == meeting_id,
         _models.Meeting.user_id == user.id
     ).first()
-
     if not meeting:
-        raise HTTPException(status_code=404, detail="Meeting not found or not authorized")
+        raise HTTPException(status_code=404, detail="Meeting not found")
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    filename = f"{filetype}_{meeting_id}_{file.filename}"
+    filename = f"{meeting_id}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, filename)
 
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Save path to DB
+    # Prepare meeting library record
     library = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
     if not library:
         library = _models.MeetingLibrary(meeting_id=meeting_id)
         db.add(library)
 
-    setattr(library, f"{filetype}_path", file_path)
+    transcript_text = None
+    if ext == "txt":
+        library.transcript_path = file_path
+    elif ext in ["mp3", "wav"]:
+        library.audio_path = file_path
+        transcript_text = transcribe_audio(file_path)
+    elif ext == "mp4":
+        library.video_path = file_path
+        audio_temp_path = file_path.replace(".mp4", ".mp3")
+        try:
+            mp.VideoFileClip(file_path).audio.write_audiofile(audio_temp_path)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to extract audio: {str(e)}")
+
+        transcript_text = transcribe_audio(audio_temp_path)
+
+    # If transcription done, save to .txt
+    if transcript_text:
+        transcript_path = file_path.rsplit('.', 1)[0] + "_transcript.txt"
+        with open(transcript_path, "w", encoding="utf-8") as f:
+            f.write(transcript_text)
+        library.transcript_path = transcript_path
+
     db.commit()
     db.refresh(library)
 
-    # 🔄 In-place File Processing (send to DataPrep)
+    # Vector embedding call
     try:
-        with open(file_path, 'rb') as f:
-            files = {'files': (filename, f)}
+        with open(library.transcript_path, 'rb') as f:
+            files = {'files': (os.path.basename(library.transcript_path), f)}
             data = {
                 "index_name": str(meeting_id),
                 "chunk_size": "500",
@@ -81,6 +104,3 @@ async def upload_single_meeting_file(
         raise HTTPException(status_code=500, detail=f"File uploaded but embedding failed: {str(e)}")
 
     return library
-    
-
-
