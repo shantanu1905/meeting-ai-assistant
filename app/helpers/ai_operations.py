@@ -1,6 +1,45 @@
 import json
 import requests
 from app.helpers.constants import EMBEDDING_URL , RETRIVER_URL , OLLAMA_URL
+from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
+import torchaudio
+import torch
+import os
+
+
+processor = AutoProcessor.from_pretrained("openai/whisper-tiny")
+model = AutoModelForSpeechSeq2Seq.from_pretrained("openai/whisper-tiny")
+model.eval()
+
+def transcribe_audio(file_path: str) -> str:
+    # Load audio
+    speech_array, sampling_rate = torchaudio.load(file_path)
+
+    # Resample to 16kHz
+    if sampling_rate != 16000:
+        resampler = torchaudio.transforms.Resample(orig_freq=sampling_rate, new_freq=16000)
+        speech_array = resampler(speech_array)
+
+    # Convert stereo to mono
+    if speech_array.shape[0] > 1:
+        speech_array = torch.mean(speech_array, dim=0, keepdim=True)
+
+    # Preprocess and transcribe
+    input_features = processor(
+        speech_array.squeeze().numpy(),
+        sampling_rate=16000,
+        return_tensors="pt"
+    ).input_features
+
+    with torch.no_grad():
+        predicted_ids = model.generate(input_features)
+
+    transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+    return transcription
+
+
+
+
 
 def get_embedding(text, url = EMBEDDING_URL):
     headers = {
