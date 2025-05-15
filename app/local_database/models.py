@@ -29,6 +29,7 @@ class Meeting(_database.Base):
     __tablename__ = "meetings"
     id = _sql.Column(_sql.Integer, primary_key=True, index=True)
     meeting_name = _sql.Column(_sql.String, nullable=False)
+    meeting_description = _sql.Column(_sql.Text  , nullable=False)
     meeting_date = _sql.Column(_sql.DateTime, default=_dt.datetime.utcnow)
     user_id = _sql.Column(_sql.Integer, _sql.ForeignKey("users.id"))
 
