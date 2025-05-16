@@ -5,7 +5,7 @@ import app.local_database.models as _models
 import app.helpers.auth_services as _services
 import app.local_database.database as _database
 from app.helpers.constants import EMBEDDING_URL , RETRIVER_URL
-from app.helpers.ai_operations import get_embedding, retrieve_similar_documents, build_qa_prompt , generate_llm_answer , meeting_minutes_prompt , parse_meeting_minutes
+from app.helpers.utils import get_embedding, retrieve_similar_documents, build_qa_prompt , generate_llm_answer , meeting_minutes_prompt , parse_meeting_minutes , summarize_text
 from app.logger import Logger
 import sqlalchemy.orm as _orm
 import os 
@@ -26,7 +26,7 @@ def get_db():
         db.close()
 
 
-@router.post("/meeting_qna")
+@router.post("/ai/meeting_qna")
 async def meeting_qna(  
     meeting: _schemas.MeetingQandA,
     db: _orm.Session = _fastapi.Depends(get_db),
@@ -74,7 +74,7 @@ async def meeting_qna(
 
 
 
-@router.post("/meeting_minutes/")
+@router.post("/ai/meeting_minutes/")
 async def generate_meeting_minutes(
     meeting_input: _schemas.MeetingMinutes,
     db: _orm.Session = _fastapi.Depends(get_db),
@@ -121,3 +121,44 @@ async def generate_meeting_minutes(
         raise _fastapi.HTTPException(status_code=500, detail="Failed to generate meeting minutes")
 
     return {"meeting_id": meeting_id, "neeting_of_minutes": structured}
+
+
+@router.get("/meeting_summary/{meeting_id}")
+async def generate_meeting_summary(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+
+    # 🔐 Validate meeting ownership
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise _fastapi.HTTPException(status_code=404, detail="Meeting not found or not authorized")
+
+    # 🗂️ Fetch related transcript
+    library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+    if not library_entry or not library_entry.transcript_path:
+        raise _fastapi.HTTPException(status_code=404, detail="Transcript path not found in MeetingLibrary")
+
+    transcript_path = library_entry.transcript_path
+    if not os.path.exists(transcript_path):
+        raise _fastapi.HTTPException(status_code=404, detail="Transcript file not found on disk")
+
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript_text = f.read()
+    except Exception as e:
+        logger.error(f"Failed to read transcript: {str(e)}")
+        raise _fastapi.HTTPException(status_code=500, detail="Failed to read transcript")
+
+    # ✨ Summarize transcript
+    try:
+        summary = summarize_text(transcript_text)
+    except Exception as e:
+        logger.error(f"Summarization failed: {str(e)}")
+        raise _fastapi.HTTPException(status_code=500, detail="Failed to summarize transcript")
+
+    return {
+        "meeting_id": meeting_id,
+        "summary": summary
+    }
