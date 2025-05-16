@@ -152,3 +152,8 @@ class MeetingQandA(BaseModel):
 class MeetingMinutes(BaseModel):
     meeting_id: str
     language: str
+
+# -------------------- Summarize Meeting --------------------
+
+# class MeetingSummary(BaseModel):
+#     meeting_id: Optional[List[int]] = []
