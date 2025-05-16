@@ -2,8 +2,13 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware  # ✅ Import CORS
 from app.routers import auth, meeting, user_metadata, generative_ai
 from app.local_database.database import Base, engine
+from app.helpers.modelloader import ModelRegistry
 
 app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    ModelRegistry.load_models()
 
 # ✅ CORS Configuration
 app.add_middleware(
