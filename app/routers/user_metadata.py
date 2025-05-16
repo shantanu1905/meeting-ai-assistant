@@ -8,7 +8,7 @@ import sqlalchemy.orm as _orm
 import app.helpers.auth_services as _services
 import app.local_database.database as _database
 from app.helpers.constants import DATAPREP_URL, UPLOAD_DIR 
-from app.helpers.ai_operations import transcribe_audio
+from app.helpers.utils import transcribe_audio
 from app.logger import Logger
 import requests
 import os 
