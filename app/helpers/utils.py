@@ -1,15 +1,17 @@
+from app.helpers.constants import EMBEDDING_URL , RETRIVER_URL , OLLAMA_URL
+from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq , pipeline
 import json
 import requests
-from app.helpers.constants import EMBEDDING_URL , RETRIVER_URL , OLLAMA_URL
-from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
 import torchaudio
 import torch
 import os
 
+from app.helpers.modelloader import ModelRegistry
 
-processor = AutoProcessor.from_pretrained("openai/whisper-tiny")
-model = AutoModelForSpeechSeq2Seq.from_pretrained("openai/whisper-tiny")
-model.eval()
+# Inside any route or function
+processor = ModelRegistry.whisper_processor
+model = ModelRegistry.whisper_model
+
 
 def transcribe_audio(file_path: str) -> str:
     # Load audio
@@ -37,7 +39,75 @@ def transcribe_audio(file_path: str) -> str:
     transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
     return transcription
 
+def chunk_text(text, max_chars=1000):
+    paragraphs = text.split("\n")
+    chunks = []
+    chunk = ""
 
+    for para in paragraphs:
+        if len(chunk) + len(para) < max_chars:
+            chunk += para + "\n"
+        else:
+            chunks.append(chunk.strip())
+            chunk = para + "\n"
+    if chunk:
+        chunks.append(chunk.strip())
+    return chunks
+
+def summarize_text(text: str) -> str:
+
+    summarizer = ModelRegistry.summarizer
+    if summarizer is None:
+        raise ValueError("Summarizer model not loaded")
+
+    chunks = chunk_text(text)
+    summary_parts = []
+
+    for chunk in chunks:
+        if not chunk.strip():
+            continue
+
+        input_len = len(chunk.split())
+        max_len = min(130, int(input_len * 0.8))
+        min_len = max(30, int(max_len * 0.5))
+
+        try:
+            result = summarizer(
+                chunk,
+                max_length=max_len,
+                min_length=min_len,
+                do_sample=False
+            )
+            summary_parts.append(result[0]["summary_text"])
+        except Exception as e:
+            summary_parts.append(f"[Summary error]: {str(e)}")
+
+    return "\n".join(summary_parts).strip()
+
+# def summarize_text(text: str, max_chunk_length: int = 1024) -> str:
+#     if not text.strip():
+#         return "Transcript is empty."
+
+#     chunks = []
+#     current_chunk = ""
+#     for paragraph in text.split("\n"):
+#         if len(current_chunk) + len(paragraph) < max_chunk_length:
+#             current_chunk += paragraph + "\n"
+#         else:
+#             chunks.append(current_chunk.strip())
+#             current_chunk = paragraph + "\n"
+#     if current_chunk:
+#         chunks.append(current_chunk.strip())
+
+#     summaries = []
+#     for chunk in chunks:
+#         try:
+#             summary = summarizer(chunk, max_length=130, min_length=30, do_sample=False)[0]['summary_text']
+#             summaries.append(summary)
+#         except Exception as e:
+#             summaries.append("[Error summarizing chunk]")
+
+#     return "\n".join(summaries)
 
 
 
