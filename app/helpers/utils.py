@@ -5,7 +5,6 @@ import requests
 import torchaudio
 import torch
 import os
-
 from app.helpers.modelloader import ModelRegistry
 
 # Inside any route or function
