@@ -73,23 +73,29 @@ async def meeting_qna(
 
 
 
-
 @router.post("/ai/meeting_minutes/")
 async def generate_meeting_minutes(
     meeting_input: _schemas.MeetingMinutes,
     db: _orm.Session = _fastapi.Depends(get_db),
     user: _schemas.User = _fastapi.Depends(_services.get_current_user)
 ):
-   
     meeting_id = meeting_input.meeting_id
     language = meeting_input.language
-    
-
 
     # 🔐 Validate meeting ownership
     meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
     if not meeting:
         raise _fastapi.HTTPException(status_code=404, detail="Meeting not found or not authorized")
+
+    # 🧠 Check for existing AI insights
+    insight = db.query(_models.MeetingInsights).filter_by(meeting_id=meeting_id).first()
+
+    if insight and insight.is_minutes_stored and not insight.reset_requested:
+        return {
+            "meeting_id": meeting_id,
+            "minutes_of_meeting": insight.minutes_of_meeting,
+            "cached": True
+        }
 
     # 🗂️ Fetch related MeetingLibrary record
     library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
@@ -107,35 +113,61 @@ async def generate_meeting_minutes(
         logger.error(f"Failed to read transcript: {str(e)}")
         raise _fastapi.HTTPException(status_code=500, detail="Failed to read transcript")
 
-    # 🧠 Build prompt for meeting minutes
+    # 🧠 Build prompt and call LLM
     context_chunks = [{"text": transcript_text}]
     prompt = meeting_minutes_prompt(context_chunks)
 
-    # ✨ Call LLM to generate minutes
     try:
         meeting_minutes = generate_llm_answer(prompt)
-        structured = parse_meeting_minutes(meeting_minutes)
-
+        structured_minutes = parse_meeting_minutes(meeting_minutes)
     except Exception as e:
         logger.error(f"LLM generation failed: {str(e)}")
         raise _fastapi.HTTPException(status_code=500, detail="Failed to generate meeting minutes")
 
-    return {"meeting_id": meeting_id, "neeting_of_minutes": structured}
+    # 📝 Save or update MeetingInsights
+    if insight:
+        insight.minutes_of_meeting = structured_minutes
+        insight.is_minutes_stored = True
+        insight.reset_requested = False
+    else:
+        insight = _models.MeetingInsights(
+            meeting_id=meeting_id,
+            minutes_of_meeting=structured_minutes,
+            is_minutes_stored=True,
+            reset_requested=False
+        )
+        db.add(insight)
 
+    db.commit()
 
-@router.get("/meeting_summary/{meeting_id}")
+    return {
+        "meeting_id": meeting_id,
+        "minutes_of_meeting": structured_minutes,
+        "cached": False
+    }
+
+@router.get("/ai/summary/{meeting_id}")
 async def generate_meeting_summary(
     meeting_id: int,
     db: _orm.Session = _fastapi.Depends(get_db),
     user: _schemas.User = _fastapi.Depends(_services.get_current_user)
 ):
-
     # 🔐 Validate meeting ownership
     meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
     if not meeting:
         raise _fastapi.HTTPException(status_code=404, detail="Meeting not found or not authorized")
 
-    # 🗂️ Fetch related transcript
+    # 🔍 Check existing insight
+    insight = db.query(_models.MeetingInsights).filter_by(meeting_id=meeting_id).first()
+
+    if insight and insight.is_summary_stored and not insight.reset_requested:
+        return {
+            "meeting_id": meeting_id,
+            "summary": insight.summary,
+            "cached": True
+        }
+
+    # 📄 Fetch transcript
     library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
     if not library_entry or not library_entry.transcript_path:
         raise _fastapi.HTTPException(status_code=404, detail="Transcript path not found in MeetingLibrary")
@@ -151,14 +183,107 @@ async def generate_meeting_summary(
         logger.error(f"Failed to read transcript: {str(e)}")
         raise _fastapi.HTTPException(status_code=500, detail="Failed to read transcript")
 
-    # ✨ Summarize transcript
+    # ✨ Summarize
     try:
         summary = summarize_text(transcript_text)
     except Exception as e:
         logger.error(f"Summarization failed: {str(e)}")
         raise _fastapi.HTTPException(status_code=500, detail="Failed to summarize transcript")
 
+    # 💾 Save or update summary
+    if insight:
+        insight.summary = summary
+        insight.is_summary_stored = True
+        insight.reset_requested = False
+    else:
+        insight = _models.MeetingInsights(
+            meeting_id=meeting_id,
+            summary=summary,
+            is_summary_stored=True,
+            reset_requested=False
+        )
+        db.add(insight)
+
+    db.commit()
+
     return {
         "meeting_id": meeting_id,
-        "summary": summary
+        "summary": summary,
+        "cached": False
+    }
+
+@router.get("/ai/transcript/{meeting_id}")
+async def get_transcript(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+    # 🔐 Check meeting ownership
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found or not authorized")
+
+    # 📁 Get transcript path
+    library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+    if not library_entry or not library_entry.transcript_path:
+        raise HTTPException(status_code=404, detail="Transcript path not found in MeetingLibrary")
+
+    transcript_path = library_entry.transcript_path
+    if not os.path.exists(transcript_path):
+        raise HTTPException(status_code=404, detail="Transcript file not found on disk")
+
+       # 📄 Read and format transcript
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+            transcript_text = ''.join([line.strip() + '\n' for line in lines])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read transcript: {str(e)}")
+    return {
+        "meeting_id": meeting_id,
+        "transcript": transcript_text
+    }
+
+
+
+
+
+@router.delete("/ai/reset/{meeting_id}")
+async def reset_ai_generated_data(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+    # 🔐 Validate meeting ownership
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise _fastapi.HTTPException(status_code=404, detail="Meeting not found or not authorized")
+
+    # 🧠 Fetch or create insight entry
+    insight = db.query(_models.MeetingInsights).filter_by(meeting_id=meeting_id).first()
+    if not insight:
+        insight = _models.MeetingInsights(
+            meeting_id=meeting_id,
+            summary=None,
+            minutes_of_meeting=None,
+            sentiments=None,
+            is_summary_stored=False,
+            is_minutes_stored=False,
+            is_sentiment_stored=False,
+        )
+        db.add(insight)
+    else:
+        insight.summary = None
+        insight.minutes_of_meeting = None
+        insight.sentiments = None
+
+        insight.is_summary_stored = False
+        insight.is_minutes_stored = False
+        insight.is_sentiment_stored = False
+
+    db.commit()
+
+    return {
+        "meeting_id": meeting_id,
+        "message": "AI-generated content reset. You can now regenerate data."
     }
