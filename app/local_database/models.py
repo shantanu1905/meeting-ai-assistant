@@ -3,6 +3,7 @@ import sqlalchemy as _sql
 import sqlalchemy.orm as _orm
 import passlib.hash as _hash
 import app.local_database.database as _database
+from sqlalchemy.dialects.postgresql import JSON
 
 _database.Base.metadata.create_all(_database.engine)
 
@@ -37,10 +38,7 @@ class Meeting(_database.Base):
     library = _orm.relationship("MeetingLibrary", back_populates="meeting", uselist=False)
     insights = _orm.relationship("MeetingInsights", back_populates="meeting", uselist=False)
     participants = _orm.relationship("Participant", back_populates="meeting")
-    # sentiments = _orm.relationship("SentimentLine", back_populates="meeting")
-    # translations = _orm.relationship("Translation", back_populates="meeting")
-
-
+ 
 
 # 2. MeetingLibrary Table
 class MeetingLibrary(_database.Base):
@@ -53,15 +51,20 @@ class MeetingLibrary(_database.Base):
 
     meeting = _orm.relationship("Meeting", back_populates="library")
 
-# 3. MeetingInsights Table
 class MeetingInsights(_database.Base):
     __tablename__ = "meeting_insights"
     id = _sql.Column(_sql.Integer, primary_key=True)
-    summary = _sql.Column(_sql.Text)
-    action_points = _sql.Column(_sql.Text)
-    minutes_of_meeting = _sql.Column(_sql.Text)
-    meeting_id = _sql.Column(_sql.Integer, _sql.ForeignKey("meetings.id"))
+    # JSON fields for AI-generated content
+    summary = _sql.Column(JSON, nullable=True)
+    minutes_of_meeting = _sql.Column(JSON, nullable=True)
+    sentiments = _sql.Column(JSON, nullable=True)
 
+    # Individual flags for content presence
+    is_summary_stored = _sql.Column(_sql.Boolean, default=False)
+    is_minutes_stored = _sql.Column(_sql.Boolean, default=False)
+    is_sentiment_stored = _sql.Column(_sql.Boolean, default=False)
+    reset_requested = _sql.Column(_sql.Boolean, default=False)       # 🔄 Lets user trigger re-generation
+    meeting_id = _sql.Column(_sql.Integer, _sql.ForeignKey("meetings.id"))
     meeting = _orm.relationship("Meeting", back_populates="insights")
 
 # 5. Participant Table
@@ -76,54 +79,9 @@ class Participant(_database.Base):
 
 
 
-# # 6. SentimentLine Table
-# class SentimentLine(_database.Base):
-#     __tablename__ = "sentiment_lines"
-#     id = _sql.Column(_sql.Integer, primary_key=True)
-#     sentence = _sql.Column(_sql.Text)
-#     sentiment = _sql.Column(_sql.String)  # Positive / Negative / Neutral
-#     meeting_id = _sql.Column(_sql.Integer, _sql.ForeignKey("meetings.id"))
-
-#     meeting = _orm.relationship("Meeting", back_populates="sentiments")
-
-
-
-
-# # 7. Translation Table
-# class Translation(_database.Base):
-#     __tablename__ = "translations"
-#     id = _sql.Column(_sql.Integer, primary_key=True)
-#     language = _sql.Column(_sql.String)
-#     translated_text = _sql.Column(_sql.Text)
-#     meeting_id = _sql.Column(_sql.Integer, _sql.ForeignKey("meetings.id"))
-
-#     meeting = _orm.relationship("Meeting", back_populates="translations")
 
 
 
 
 
-
-
-
-
-
-
-
-# class Product(_database.Base):
-#     __tablename__ = "products"
-
-#     id = _sql.Column(_sql.Integer, primary_key=True, index=True)
-#     name = _sql.Column(_sql.String, index=True)
-#     image_url = _sql.Column(_sql.String, index=True)
-#     ean = _sql.Column(_sql.String,index=True )
-#     brand = _sql.Column(_sql.String, index=True)
-#     category = _sql.Column(_sql.String, index=True)
-#     price  = _sql.Column(_sql.Integer,index=True)
-#     description = _sql.Column(_sql.String, index=True)
-#     owner_id = _sql.Column(_sql.Integer, _sql.ForeignKey("users.id"))
-
-
-
-#     owner = _orm.relationship("User", back_populates="products")
 
