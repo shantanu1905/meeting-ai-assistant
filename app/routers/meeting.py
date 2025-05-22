@@ -8,6 +8,8 @@ import app.helpers.auth_services as _services
 import app.local_database.database as _database
 from app.logger import Logger
 from typing import List, Optional
+import os
+from app.helpers.utils import  MeetingCleanup
 
 from fastapi import status
 
@@ -124,6 +126,8 @@ async def get_meeting_by_id(
     logger.info(f"Retrieved meeting '{meeting.meeting_name}' (ID: {meeting.id}) for user {user.email}")
     return meeting
 
+
+
 @router.delete("/meetings/delete/{meeting_id}", response_model=dict)
 async def delete_meeting(
     meeting_id: int,
@@ -131,15 +135,32 @@ async def delete_meeting(
     user: _schemas.User = _fastapi.Depends(_services.get_current_user)
 ):
     meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
-
     if not meeting:
         raise HTTPException(status_code=404, detail=f"Meeting not found for meeting_id {meeting_id}")
 
-    # Optional: delete related records manually if cascade isn't configured
+    library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+
+    cleanup = MeetingCleanup()
+
+    # Delete Redis vectors
+    redis_deleted_count = cleanup.delete_rag_redis_vectors(str(meeting_id))
+
+    # Delete local files
+    deleted_file_paths = cleanup.delete_all_meeting_files(library_entry)
+
+    # Delete DB records
+    if library_entry:
+        db.delete(library_entry)
     db.delete(meeting)
     db.commit()
 
-    return {"detail": f"Meeting {meeting_id} deleted successfully"}
+    return {
+        "detail": f"Meeting {meeting_id} deleted successfully",
+        "redis_vectors_deleted": redis_deleted_count,
+        "files_deleted": deleted_file_paths
+    }
+
+
 
 
 @router.delete("/delete_participant/{participant_id}", status_code=status.HTTP_200_OK)
@@ -167,3 +188,70 @@ async def delete_participant(
     db.commit()
 
     return {"message": f"Participant with ID {participant_id} deleted successfully."}
+
+
+
+@router.get("/meetings/media/{meeting_id}", response_model=dict)
+async def get_meeting_media_files(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+    # 🔐 Ensure user owns the meeting
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found ")
+
+    # 📦 Get associated file paths from MeetingLibrary
+    library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+    if not library_entry:
+        raise HTTPException(status_code=404, detail="MeetingLibrary entry not found")
+
+    # 📂 Collect available file paths
+    media_files = {}
+    for column in library_entry.__table__.columns:
+        if "path" in column.name:
+            file_path = getattr(library_entry, column.name)
+            if file_path and os.path.exists(file_path):
+                media_files[column.name] = file_path
+            elif file_path:
+                media_files[column.name] = "File not found on disk"
+
+    return {
+        "meeting_id": meeting_id,
+        "media_files": media_files
+    }
+
+
+@router.get("/meetings/chathistory/{meeting_id}", response_model=List[dict])
+async def get_chat_history(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+    # 🔐 Ensure meeting belongs to user
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found ")
+
+    # 📜 Get chat messages ordered by timestamp
+    messages = (
+        db.query(_models.ChatMessage)
+        .filter_by(meeting_id=meeting_id)
+        .order_by(_models.ChatMessage.timestamp.asc())
+        .all()
+    )
+
+    if not messages:
+        raise HTTPException(status_code=404, detail="No chat history found for this meeting")
+
+    chat_history = [
+        {
+            "message": msg.message,
+            "sender_type": msg.sender_type,
+            "timestamp": msg.timestamp.isoformat()
+        }
+        for msg in messages
+    ]
+
+    return chat_history
