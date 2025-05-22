@@ -36,8 +36,8 @@ async def meeting_qna(
     meeting_id = meeting.meeting_id
 
     # 🔐 Validate ownership of meeting
-    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
-    if not meeting:
+    meeting_obj = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting_obj:
         raise HTTPException(status_code=404, detail="Meeting not found or not authorized")
 
     index_name = str(meeting_id)
@@ -69,7 +69,24 @@ async def meeting_qna(
         logger.error(f"LLM generation failed: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to generate answer")
 
+    # Step 5: Save chat messages
+    user_message = _models.ChatMessage(
+        meeting_id=meeting_id,
+        message=question,
+        sender_type="user"
+    )
+
+    bot_message = _models.ChatMessage(
+        meeting_id=meeting_id,
+        message=answer,
+        sender_type="bot"
+    )
+
+    db.add_all([user_message, bot_message])
+    db.commit()
+
     return {"question": question, "answer": answer}
+
 
 
 
