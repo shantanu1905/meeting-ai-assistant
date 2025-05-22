@@ -19,7 +19,6 @@ class User(_database.Base):
     
     meetings = _orm.relationship("Meeting", back_populates="user")
 
-
     def verify_password(self, password: str):
         return _hash.bcrypt.verify(password, self.hashed_password)
 
@@ -38,6 +37,7 @@ class Meeting(_database.Base):
     library = _orm.relationship("MeetingLibrary", back_populates="meeting", uselist=False)
     insights = _orm.relationship("MeetingInsights", back_populates="meeting", uselist=False)
     participants = _orm.relationship("Participant", back_populates="meeting")
+    chat_messages = _orm.relationship("ChatMessage", back_populates="meeting", cascade="all, delete-orphan")
  
 
 # 2. MeetingLibrary Table
@@ -77,11 +77,15 @@ class Participant(_database.Base):
 
     meeting = _orm.relationship("Meeting", back_populates="participants")
 
+class ChatMessage(_database.Base):
+    __tablename__ = "chat_messages"
 
+    id = _sql.Column(_sql.Integer, primary_key=True, index=True)
+    meeting_id = _sql.Column(_sql.Integer, _sql.ForeignKey("meetings.id"), nullable=False)
+    message = _sql.Column(_sql.Text, nullable=False)
+    sender_type = _sql.Column(_sql.String(50), default="text")  # e.g. Bot, User
+    timestamp = _sql.Column(_sql.DateTime, default=_sql.func.now())
 
-
-
-
-
-
-
+    # Relationships (optional)
+    meeting = _orm.relationship("Meeting", back_populates="chat_messages")
+    
