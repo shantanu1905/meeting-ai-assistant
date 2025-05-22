@@ -6,14 +6,21 @@ import torchaudio
 import torch
 import os
 from app.helpers.modelloader import ModelRegistry
+import math
+from dotenv import load_dotenv
 
-# Inside any route or function
-processor = ModelRegistry.whisper_processor
-model = ModelRegistry.whisper_model
+load_dotenv()
 
+import redis
+
+
+
+MAX_DURATION = 30  # seconds
 
 def transcribe_audio(file_path: str) -> str:
-    # Load audio
+    model = ModelRegistry.whisper_model
+    processor = ModelRegistry.whisper_processor
+
     speech_array, sampling_rate = torchaudio.load(file_path)
 
     # Resample to 16kHz
@@ -25,18 +32,31 @@ def transcribe_audio(file_path: str) -> str:
     if speech_array.shape[0] > 1:
         speech_array = torch.mean(speech_array, dim=0, keepdim=True)
 
-    # Preprocess and transcribe
-    input_features = processor(
-        speech_array.squeeze().numpy(),
-        sampling_rate=16000,
-        return_tensors="pt"
-    ).input_features
+    waveform = speech_array.squeeze(0)
+    chunk_size = MAX_DURATION * 16000  # samples per chunk
+    total_samples = waveform.shape[0]
+    num_chunks = math.ceil(total_samples / chunk_size)
 
-    with torch.no_grad():
-        predicted_ids = model.generate(input_features)
+    transcription = ""
 
-    transcription = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
-    return transcription
+    for i in range(num_chunks):
+        start = i * chunk_size
+        end = min(start + chunk_size, total_samples)
+        chunk = waveform[start:end]
+
+        input_features = processor(
+            chunk.numpy(),
+            sampling_rate=16000,
+            return_tensors="pt"
+        ).input_features
+
+        with torch.no_grad():
+            predicted_ids = model.generate(input_features)
+
+        text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+        transcription += text + "\n"
+
+    return transcription.strip()
 
 def chunk_text(text, max_chars=1000):
     paragraphs = text.split("\n")
@@ -188,25 +208,6 @@ def meeting_minutes_prompt(context_chunks):
                     6. Return only the final meeting minutes to the user.
                 """
 
-    EXAMPLE_OUTPUT = """
-            **Summary:**
-
-            The team met to finalize the marketing strategy for Q3 and align on the timeline for the Version 2.1 product launch.
-
-            **Decisions:**
-
-            **Action Items:**
-
-            Alice (Marketing Lead): Prepare campaign assets by July 5th.
-            John (Product Manager): Coordinate beta testing with QA team.
-            Meera (Sales): Draft customer communication for new release.
-
-            **Additional Notes:**
-
-            - Budget reallocation for paid campaigns will be reviewed in next finance sync.
-            - Potential partnership with Growthly discussed; requires follow-up.
-            """
-
     context_text = "\n\n---\n\n".join(chunk["text"] for chunk in context_chunks)
 
     prompt = (
@@ -215,7 +216,6 @@ def meeting_minutes_prompt(context_chunks):
         "Transcript:\n"
         f"{context_text}\n\n"
         "Generate the meeting minutes below:\n"
-        f"{EXAMPLE_OUTPUT}\n\n"
         "**Meeting Minutes:**\n"
     )
 
@@ -279,45 +279,42 @@ def answer_question(question, embedding, index_name):
 
 
 
+class MeetingCleanup:
+    def __init__(self, ):
+        self.redis_client = redis.Redis(host=os.getenv("REDIS_HOST"), port=os.getenv("REDIS_PORT"), db=os.getenv("REDIS_DB"))
 
+    def delete_rag_redis_vectors(self, pattern_string: str) -> int:
+        """
+        Deletes all Redis keys matching the given pattern (e.g., vector embeddings).
+        """
+        pattern = f"doc:{pattern_string}:*"
+        deleted_count = 0
 
+        try:
+            for key in self.redis_client.scan_iter(match=pattern, count=100):
+                self.redis_client.delete(key)
+                deleted_count += 1
 
+            print(f"✅ Deleted {deleted_count} keys matching pattern '{pattern}'.")
+            return deleted_count
 
+        except Exception as e:
+            print(f"❌ Error deleting keys: {e}")
+            return 0
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-# # Example usage
-# # Assuming you have a vector from embedding service
-# text = "tell me about problem solving"
-# example_embedding = [0.1, 0.2, 0.3, ...]  # replace with actual 3072-dimensional vector
-# index = "my_index"
-
-# results = retrieve_similar_documents(text, example_embedding, index)
-# print("Retrieved documents:", results)
-
-
-
-# # Example usage
-# text = "hello world"
-# vector = get_embedding(text)
-# print("Embedding vector:", vector)
-
-
-
-
-
-
-
-
-
+    def delete_all_meeting_files(self, library_entry) -> list:
+        """
+        Delete all file paths stored in the MeetingLibrary model entry.
+        """
+        deleted_files = []
+        if library_entry:
+            for column in library_entry.__table__.columns:
+                if 'path' in column.name:
+                    path = getattr(library_entry, column.name)
+                    if path and os.path.exists(path):
+                        try:
+                            os.remove(path)
+                            deleted_files.append(path)
+                        except Exception as e:
+                            print(f"Failed to delete file {path}: {str(e)}")
+        return deleted_files
