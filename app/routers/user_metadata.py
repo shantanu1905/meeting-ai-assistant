@@ -1,5 +1,6 @@
 
 from fastapi import APIRouter ,  HTTPException , BackgroundTasks
+from fastapi.responses import StreamingResponse
 import fastapi as _fastapi
 from fastapi import UploadFile, File, Form
 import app.local_database.schemas as _schemas
@@ -104,3 +105,41 @@ async def upload_single_meeting_file(
         raise HTTPException(status_code=500, detail=f"File uploaded but embedding failed: {str(e)}")
 
     return library
+
+
+@router.get("/meetings/media_stream/{meeting_id}")
+async def stream_meeting_file(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+    meeting = db.query(_models.Meeting).filter(
+        _models.Meeting.id == meeting_id,
+        _models.Meeting.user_id == user.id
+    ).first()
+
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    library = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+    if not library:
+        raise HTTPException(status_code=404, detail="No media available for this meeting or you have uploaded transcript only")
+
+    # Prefer video if available, otherwise audio
+    file_path = library.video_path or library.audio_path
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Media file not found")
+
+    # Determine MIME type
+    ext = os.path.splitext(file_path)[-1].lower()
+    media_type = {
+        ".mp4": "video/mp4",
+        ".mp3": "audio/mpeg",
+        ".wav": "audio/wav"
+    }.get(ext, "application/octet-stream")
+
+    def file_stream():
+        with open(file_path, "rb") as f:
+            yield from f
+
+    return StreamingResponse(file_stream(), media_type=media_type)
