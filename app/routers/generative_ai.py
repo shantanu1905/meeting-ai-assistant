@@ -5,7 +5,7 @@ import app.local_database.models as _models
 import app.helpers.auth_services as _services
 import app.local_database.database as _database
 from app.helpers.constants import EMBEDDING_URL , RETRIVER_URL
-from app.helpers.utils import get_embedding, retrieve_similar_documents, build_qa_prompt , generate_llm_answer , meeting_minutes_prompt , parse_meeting_minutes , summarize_text
+from app.helpers.utils import get_embedding, retrieve_similar_documents, build_qa_prompt , generate_llm_answer , meeting_minutes_prompt , parse_meeting_minutes , summarize_text , analyze_sentiment
 from app.logger import Logger
 import sqlalchemy.orm as _orm
 import os 
@@ -265,7 +265,7 @@ async def get_transcript(
 
 
 
-@router.delete("/ai/reset/{meeting_id}")
+@router.delete("/meeting/reset_ai_response/{meeting_id}")
 async def reset_ai_generated_data(
     meeting_id: int,
     db: _orm.Session = _fastapi.Depends(get_db),
@@ -302,5 +302,76 @@ async def reset_ai_generated_data(
 
     return {
         "meeting_id": meeting_id,
-        "message": "AI-generated content reset. You can now regenerate data."
+        "message": "AI-generated content reset. You can now regenerate ai response."
+
+    }
+
+
+
+
+
+
+@router.get("/meetings/get_sentiment/{meeting_id}")
+async def generate_meeting_sentiment(
+    meeting_id: int,
+    db: _orm.Session = _fastapi.Depends(get_db),
+    user: _schemas.User = _fastapi.Depends(_services.get_current_user)
+):
+    # 🔐 Verify user and meeting
+    meeting = db.query(_models.Meeting).filter_by(id=meeting_id, user_id=user.id).first()
+    if not meeting:
+        raise _fastapi.HTTPException(status_code=404, detail="Meeting not found or not authorized")
+
+    # 🔍 Get or create insights record
+    insight = db.query(_models.MeetingInsights).filter_by(meeting_id=meeting_id).first()
+
+    if insight and insight.is_sentiment_stored and not insight.reset_requested:
+        return {
+            "meeting_id": meeting_id,
+            "sentiments": insight.sentiments,
+            "cached": True
+        }
+
+    # 📄 Get transcript
+    library_entry = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+    if not library_entry or not library_entry.transcript_path:
+        raise _fastapi.HTTPException(status_code=404, detail="Transcript not found")
+
+    transcript_path = library_entry.transcript_path
+    if not os.path.exists(transcript_path):
+        raise _fastapi.HTTPException(status_code=404, detail="Transcript file missing on disk")
+
+    # 📖 Read transcript
+    try:
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript_lines = [line.strip() for line in f if line.strip()]
+    except Exception as e:
+        raise _fastapi.HTTPException(status_code=500, detail=f"Error reading transcript: {str(e)}")
+
+    # ✨ Perform sentiment analysis
+    try:
+        
+        sentiments = analyze_sentiment(transcript_lines)
+    except Exception as e:
+        raise _fastapi.HTTPException(status_code=500, detail=f"Sentiment analysis failed: {str(e)}")
+
+    # 💾 Save or update insights
+    if insight:
+        insight.sentiments = sentiments
+        insight.is_sentiment_stored = True
+        insight.reset_requested = False
+    else:
+        insight = _models.MeetingInsights(
+            meeting_id=meeting_id,
+            sentiments=sentiments,
+            is_sentiment_stored=True
+        )
+        db.add(insight)
+
+    db.commit()
+
+    return {
+        "meeting_id": meeting_id,
+        "sentiments": sentiments,
+        "cached": False
     }
