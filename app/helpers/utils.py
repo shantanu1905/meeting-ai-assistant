@@ -275,6 +275,48 @@ def answer_question(question, embedding, index_name):
 
 
 
+def analyze_sentiment(lines):
+    """
+    Analyzes the sentiment of each line in a list of strings, safely handling long inputs.
+
+    Args:
+        lines (List[str]): List of transcript lines or sentences.
+
+    Returns:
+        List[Dict]: A list of dictionaries with line, sentiment label, and confidence score.
+    """
+    if ModelRegistry.sentiment_analyzer is None:
+        raise ValueError("Sentiment analyzer model not loaded.")
+
+    tokenizer = ModelRegistry.sentiment_analyzer.tokenizer
+    max_length = tokenizer.model_max_length
+
+    results = []
+    for line in lines:
+        if not line.strip():
+            continue  # Skip empty lines
+
+        try:
+            # Truncate line if too long
+            tokens = tokenizer.encode(line, truncation=True, max_length=max_length)
+            truncated_line = tokenizer.decode(tokens, skip_special_tokens=True)
+
+            result = ModelRegistry.sentiment_analyzer(truncated_line)[0]
+            results.append({
+                "line": truncated_line,
+                "label": result['label'],
+                "score": round(result['score'], 3)
+            })
+        except Exception as e:
+            results.append({
+                "line": line,
+                "label": "error",
+                "score": 0.0,
+                "error": str(e)
+            })
+
+    return results
+
 
 
 
