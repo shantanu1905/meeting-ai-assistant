@@ -232,7 +232,7 @@ def parse_meeting_minutes(raw_text: str) -> dict:
     patterns = {
         "summary": r"\*\*Summary:\*\*\s*(.*?)(?=\n\n\*\*Decisions:|\Z)",
         "decisions": r"\*\*Decisions:\*\*\s*(.*?)(?=\n\n\*\*Action Items:|\Z)",
-        "action_items": r"\*\*Action Items:\*\*\s*(.*?)(?=\n\n\*\*Additional Notes:|\Z)",
+        "action_items": r"\*\*Action Items:\*\*\s*(.*?)(?=\n\n|\Z)",
         "additional_notes": r"\*\*Additional Notes:\*\*\s*(.*?)(?=\n\n|\Z)"
     }
 

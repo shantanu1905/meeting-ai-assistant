@@ -143,3 +143,38 @@ async def stream_meeting_file(
             yield from f
 
     return StreamingResponse(file_stream(), media_type=media_type)
+
+
+
+# @router.get("/meetings/media_stream/{meeting_id}")
+# async def stream_meeting_file(
+#     meeting_id: int,
+#     db: _orm.Session = _fastapi.Depends(get_db)
+# ):
+#     meeting = db.query(_models.Meeting).filter_by(id=meeting_id).first()
+
+#     if not meeting:
+#         raise HTTPException(status_code=404, detail="Meeting not found")
+
+#     library = db.query(_models.MeetingLibrary).filter_by(meeting_id=meeting_id).first()
+#     if not library:
+#         raise HTTPException(status_code=404, detail="No media available for this meeting or transcript only")
+
+#     # Prefer video if available, otherwise audio
+#     file_path = library.video_path or library.audio_path
+#     if not file_path or not os.path.exists(file_path):
+#         raise HTTPException(status_code=404, detail="Media file not found")
+
+#     # Determine MIME type
+#     ext = os.path.splitext(file_path)[-1].lower()
+#     media_type = {
+#         ".mp4": "video/mp4",
+#         ".mp3": "audio/mpeg",
+#         ".wav": "audio/wav"
+#     }.get(ext, "application/octet-stream")
+
+#     def file_stream():
+#         with open(file_path, "rb") as f:
+#             yield from f
+
+#     return StreamingResponse(file_stream(), media_type=media_type)
