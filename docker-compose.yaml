@@ -1,0 +1,102 @@
+version: '0.1'
+
+services:
+  # Text Embeddings Inference Service
+  tei-embedding-serving:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.6
+    container_name: tei-embedding_serving
+    ports:
+      - "8090:80"
+    volumes:
+      - ./data:/data
+    command: --model-id sentence-transformers/all-MiniLM-L6-v2
+    pull_policy: always
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  # Ollama Service
+  ollama:
+    image: ollama/ollama
+    container_name: ollama2
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  # Redis Stack Service
+  redis-stack:
+    image: redis/redis-stack:latest
+    container_name: redis-stack_
+    ports:
+      - "6379:6379"
+      - "8001:8001"
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: postgres-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+  # Data Preparation Service with Qdrant
+  dataprep-qdrant-server:
+    image: opea/dataprep:latest
+    container_name: dataprep-server
+    ports:
+      - "6007:5000"
+    environment:
+      - REDIS_HOST=redis-stack
+      - REDIS_PORT=6379
+      - TEI_EMBEDDING_ENDPOINT=http://tei-embedding-serving:80
+      - HUGGINGFACEHUB_API_TOKEN=${HUGGING_FACE_API_KEY}
+    depends_on:
+      - redis-stack
+      - tei-embedding-serving
+    networks:
+      - ai-network
+    restart: unless-stopped
+    ipc: host
+
+  # Retriever Service
+  retriever-service:
+    image: opea/retriever:latest
+    container_name: retriever_service
+    ports:
+      - "6008:7000"
+    environment:
+      - REDIS_URL=redis://redis-stack:6379
+      - TEI_EMBEDDING_ENDPOINT=http://tei-embedding-serving:80
+      - RETRIEVE_MODEL_ID=BAAI/bge-base-en-v1.5
+      - HUGGINGFACEHUB_API_TOKEN=${HUGGING_FACE_API_KEY}
+    depends_on:
+      - redis-stack
+      - tei-embedding-serving
+    networks:
+      - ai-network
+    restart: unless-stopped
+
+# Named volumes for data persistence
+volumes:
+  ollama:
+  postgres_data:
+
+# Custom network for service communication
+networks:
+  ai-network:
+    driver: bridge
