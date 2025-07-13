@@ -63,7 +63,7 @@ Users can effortlessly upload their meeting data—whether transcripts or audio/
 
 ### Architecture
 
-![Architecture](./documentation/Architecture Diagram.drawio (1).png)
+![Architecture](https://github.com/shantanu1905/meeting-ai-assistant/blob/main/documentation/Architecture%20Diagram.drawio%20(1).png)
 
 
 
